@@ -10,8 +10,8 @@ import torch.nn.functional as F
 # A T4 não tem, em bf16, o atalho de memória da atenção: o PyTorch montaria a matriz inteira de uma vez (4 a 6 GB).
 # Aqui a atenção é feita em fatias de 1024 posições: mesmo resultado, pouca memória.
 _sdpa = F.scaled_dot_product_attention
-def _sdpa_fatiado(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kw):
-    n = q.shape[-2]
+def _sdpa_fatiado(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kw):
+    q, k, v = query, key, value; n = q.shape[-2]
     if n <= 1024 or is_causal:
         return _sdpa(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kw)
     out = []
@@ -60,6 +60,7 @@ json.dump(dict({k: v[0] for k, v in CENAS.items()}, _neg=NEG), open('textos.json
 open('texto.py', 'w').write(TEXTO)
 r = subprocess.run([sys.executable, 'texto.py'], capture_output=True, text=True)
 print(r.stdout[-300:], r.stderr[-600:] if r.returncode else '', flush=True)
+if r.returncode: raise SystemExit('o texto falhou: reinicie a sessão (Ambiente de execução > Reiniciar sessão) e rode de novo')
 EMB = torch.load('emb.pt')
 E = {k: (EMB[k][0].to('cuda'), EMB[k][1].to('cuda')) for k in CENAS}; EN = (EMB['_neg'][0].to('cuda'), EMB['_neg'][1].to('cuda'))
 
