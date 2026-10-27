@@ -44,7 +44,11 @@ CASOS = {
 SO = os.environ.get('SO')            # para rodar um só: %env SO=lutero_cranach
 os.makedirs('vivo', exist_ok=True)
 
-cfg = InferenceConfig(); cfg.flag_use_half_precision = True
+cfg = InferenceConfig()
+if torch.cuda.is_available(): cfg.flag_use_half_precision = True
+else:   # sem placa (a cota grátis acabou): roda no processador, mais devagar, mesmo resultado
+    cfg.flag_force_cpu = True; cfg.flag_use_half_precision = False; torch.set_num_threads(os.cpu_count() or 2)
+print('rodando em', 'GPU' if torch.cuda.is_available() else 'CPU', flush=True)
 LP = LivePortraitWrapper(cfg)
 LM = LandmarkRunner(ckpt_path=CropConfig().landmark_ckpt_path, onnx_provider='cpu')
 DEP = ort.InferenceSession('da2s.onnx', providers=['CPUExecutionProvider'])
