@@ -27,7 +27,7 @@ dt = torch.bfloat16
 
 # 1) texto -> embeddings (T5 na GPU), depois libera a memória
 tok = T5Tokenizer.from_pretrained('Lightricks/LTX-Video', subfolder='tokenizer')
-enc = T5EncoderModel.from_pretrained('Lightricks/LTX-Video', subfolder='text_encoder', torch_dtype=dt).to('cuda')
+enc = T5EncoderModel.from_pretrained('Lightricks/LTX-Video', subfolder='text_encoder', torch_dtype=dt, device_map='cuda', low_cpu_mem_usage=True)   # direto para a GPU, pedaço por pedaço (a RAM do Colab gratuito não aguenta tudo de uma vez)
 def emb(txt):
     t = tok(txt, padding='max_length', max_length=128, truncation=True, return_tensors='pt').to('cuda')
     with torch.no_grad(): e = enc(t.input_ids, attention_mask=t.attention_mask)[0]
