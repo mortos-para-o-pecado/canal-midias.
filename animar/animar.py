@@ -8,7 +8,6 @@ subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-U', 'diffusers>=
 import torch
 from diffusers import LTXImageToVideoPipeline
 from diffusers.utils import export_to_video, load_image
-from transformers import T5EncoderModel, T5Tokenizer
 
 BASE = 'https://raw.githubusercontent.com/mortos-para-o-pecado/canal-midias./main/animar/'
 NEG = ('worst quality, inconsistent motion, blurry, jittery, distorted, deformed face, deformed hands, extra fingers, '
@@ -26,16 +25,27 @@ CENAS = {
 os.makedirs('saida', exist_ok=True)
 dt = torch.bfloat16
 
-# 1) texto -> embeddings (T5 na GPU), depois libera a memória
+# 1) texto -> embeddings num processo separado (quando ele termina, a GPU fica 100% livre para o vídeo)
+TEXTO = r"""
+import torch, json, sys
+from transformers import T5EncoderModel, T5Tokenizer
+dt = torch.bfloat16
 tok = T5Tokenizer.from_pretrained('Lightricks/LTX-Video', subfolder='tokenizer')
-enc = T5EncoderModel.from_pretrained('Lightricks/LTX-Video', subfolder='text_encoder', dtype=dt, device_map='cuda', low_cpu_mem_usage=True)   # direto para a GPU, pedaço por pedaço (a RAM do Colab gratuito não aguenta tudo de uma vez)
-def emb(txt):
+enc = T5EncoderModel.from_pretrained('Lightricks/LTX-Video', subfolder='text_encoder', dtype=dt, device_map='cuda', low_cpu_mem_usage=True)
+txts = json.load(open('textos.json')); out = {}
+for k, txt in txts.items():
     t = tok(txt, padding='max_length', max_length=128, truncation=True, return_tensors='pt').to('cuda')
     with torch.no_grad(): e = enc(t.input_ids, attention_mask=t.attention_mask)[0]
-    return e.to(dt), t.attention_mask
-print('texto na GPU:', round(torch.cuda.memory_allocated() / 2**30, 1), 'GB', flush=True)
-E = {k: emb(v[0]) for k, v in CENAS.items()}; EN = emb(NEG)
-del enc; gc.collect(); torch.cuda.empty_cache()
+    out[k] = (e.to(dt).cpu(), t.attention_mask.cpu())
+torch.save(out, 'emb.pt'); print('textos prontos', flush=True)
+"""
+import json
+json.dump(dict({k: v[0] for k, v in CENAS.items()}, _neg=NEG), open('textos.json', 'w'))
+open('texto.py', 'w').write(TEXTO)
+r = subprocess.run([sys.executable, 'texto.py'], capture_output=True, text=True)
+print(r.stdout[-300:], r.stderr[-600:] if r.returncode else '', flush=True)
+EMB = torch.load('emb.pt')
+E = {k: (EMB[k][0].to('cuda'), EMB[k][1].to('cuda')) for k in CENAS}; EN = (EMB['_neg'][0].to('cuda'), EMB['_neg'][1].to('cuda'))
 
 # 2) imagem -> vídeo
 pipe = LTXImageToVideoPipeline.from_pretrained('Lightricks/LTX-Video', text_encoder=None, tokenizer=None, torch_dtype=dt)
@@ -51,14 +61,18 @@ for nome, (txt, w, h, fy) in CENAS.items():
     t0 = time.time()
     img = recorta(load_image(BASE + nome + '.jpg'), w, h, fy)
     (pe, pm), (ne, nm) = E[nome], EN
-    v = pipe(image=img, prompt_embeds=pe, prompt_attention_mask=pm, negative_prompt_embeds=ne, negative_prompt_attention_mask=nm,
+    try:
+      v = pipe(image=img, prompt_embeds=pe, prompt_attention_mask=pm, negative_prompt_embeds=ne, negative_prompt_attention_mask=nm,
              width=w, height=h, num_frames=97, num_inference_steps=40, guidance_scale=3.0,
              generator=torch.Generator('cuda').manual_seed(7)).frames[0]
+    except Exception as ex:
+        print('ERRO', nome, type(ex).__name__, str(ex)[:300], 'GPU livre:', round(torch.cuda.mem_get_info()[0] / 2**30, 1), 'GB', flush=True); continue
     export_to_video(v, f'saida/{nome}.mp4', fps=24)
     print(f'{nome}: pronto em {time.time() - t0:.0f} s', flush=True)
 
 from IPython.display import HTML, display
 from base64 import b64encode
 for nome in CENAS:
+    if not os.path.exists(f'saida/{nome}.mp4'): continue
     d = b64encode(open(f'saida/{nome}.mp4', 'rb').read()).decode()
     display(HTML(f'<p>{nome}</p><video width=360 controls loop autoplay muted src="data:video/mp4;base64,{d}"></video>'))
