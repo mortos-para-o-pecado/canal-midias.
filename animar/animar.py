@@ -6,6 +6,22 @@ import os, subprocess, sys, gc, time
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-U', 'diffusers>=0.33', 'transformers', 'accelerate', 'sentencepiece', 'imageio', 'imageio-ffmpeg'], check=True)
 import torch
+import torch.nn.functional as F
+# A T4 não tem, em bf16, o atalho de memória da atenção: o PyTorch montaria a matriz inteira de uma vez (4 a 6 GB).
+# Aqui a atenção é feita em fatias de 1024 posições: mesmo resultado, pouca memória.
+_sdpa = F.scaled_dot_product_attention
+def _sdpa_fatiado(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kw):
+    n = q.shape[-2]
+    if n <= 1024 or is_causal:
+        return _sdpa(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kw)
+    out = []
+    for i in range(0, n, 1024):
+        m = attn_mask[..., i:i + 1024, :] if (attn_mask is not None and attn_mask.dim() >= 2 and attn_mask.shape[-2] == n) else attn_mask
+        out.append(_sdpa(q[..., i:i + 1024, :], k, v, attn_mask=m, dropout_p=dropout_p, scale=scale, **kw))
+    return torch.cat(out, dim=-2)
+F.scaled_dot_product_attention = _sdpa_fatiado
+from IPython.display import HTML, display
+from base64 import b64encode
 from diffusers import LTXImageToVideoPipeline
 from diffusers.utils import export_to_video, load_image
 
@@ -57,8 +73,13 @@ def recorta(img, w, h, fy):
     else:
         nh = int(W / alvo); y0 = int(min(max(0, fy * H - nh / 2), H - nh)); img = img.crop((0, y0, W, y0 + nh))
     return img.resize((w, h))
+def mostra(nome):
+    d = b64encode(open(f'saida/{nome}.mp4', 'rb').read()).decode()
+    display(HTML(f'<p>{nome}</p><video width=360 controls loop autoplay muted src="data:video/mp4;base64,{d}"></video>'))
 for nome, (txt, w, h, fy) in CENAS.items():
+    if os.path.exists(f'saida/{nome}.mp4'): mostra(nome); continue
     t0 = time.time()
+    print(nome, '| GPU livre:', round(torch.cuda.mem_get_info()[0] / 2**30, 1), 'GB', flush=True)
     img = recorta(load_image(BASE + nome + '.jpg'), w, h, fy)
     (pe, pm), (ne, nm) = E[nome], EN
     try:
@@ -66,13 +87,7 @@ for nome, (txt, w, h, fy) in CENAS.items():
              width=w, height=h, num_frames=97, num_inference_steps=40, guidance_scale=3.0,
              generator=torch.Generator('cuda').manual_seed(7)).frames[0]
     except Exception as ex:
-        print('ERRO', nome, type(ex).__name__, str(ex)[:300], 'GPU livre:', round(torch.cuda.mem_get_info()[0] / 2**30, 1), 'GB', flush=True); continue
+        print('ERRO', nome, type(ex).__name__, str(ex)[:300], 'GPU livre:', round(torch.cuda.mem_get_info()[0] / 2**30, 1), 'GB', flush=True); torch.cuda.empty_cache(); continue
     export_to_video(v, f'saida/{nome}.mp4', fps=24)
-    print(f'{nome}: pronto em {time.time() - t0:.0f} s', flush=True)
+    print(f'{nome}: pronto em {time.time() - t0:.0f} s', flush=True); mostra(nome)
 
-from IPython.display import HTML, display
-from base64 import b64encode
-for nome in CENAS:
-    if not os.path.exists(f'saida/{nome}.mp4'): continue
-    d = b64encode(open(f'saida/{nome}.mp4', 'rb').read()).decode()
-    display(HTML(f'<p>{nome}</p><video width=360 controls loop autoplay muted src="data:video/mp4;base64,{d}"></video>'))
