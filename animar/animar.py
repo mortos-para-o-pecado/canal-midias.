@@ -3,6 +3,7 @@
 # Gera saida/<nome>.mp4 (4 s, 24 fps) e mostra no notebook. O texto (T5) roda primeiro e é descartado,
 # para caber na memória do Colab gratuito.
 import os, subprocess, sys, gc, time
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-U', 'diffusers>=0.33', 'transformers', 'accelerate', 'sentencepiece', 'imageio', 'imageio-ffmpeg'], check=True)
 import torch
 from diffusers import LTXImageToVideoPipeline
@@ -27,11 +28,12 @@ dt = torch.bfloat16
 
 # 1) texto -> embeddings (T5 na GPU), depois libera a memória
 tok = T5Tokenizer.from_pretrained('Lightricks/LTX-Video', subfolder='tokenizer')
-enc = T5EncoderModel.from_pretrained('Lightricks/LTX-Video', subfolder='text_encoder', torch_dtype=dt, device_map='cuda', low_cpu_mem_usage=True)   # direto para a GPU, pedaço por pedaço (a RAM do Colab gratuito não aguenta tudo de uma vez)
+enc = T5EncoderModel.from_pretrained('Lightricks/LTX-Video', subfolder='text_encoder', dtype=dt, device_map='cuda', low_cpu_mem_usage=True)   # direto para a GPU, pedaço por pedaço (a RAM do Colab gratuito não aguenta tudo de uma vez)
 def emb(txt):
     t = tok(txt, padding='max_length', max_length=128, truncation=True, return_tensors='pt').to('cuda')
     with torch.no_grad(): e = enc(t.input_ids, attention_mask=t.attention_mask)[0]
     return e.to(dt), t.attention_mask
+print('texto na GPU:', round(torch.cuda.memory_allocated() / 2**30, 1), 'GB', flush=True)
 E = {k: emb(v[0]) for k, v in CENAS.items()}; EN = emb(NEG)
 del enc; gc.collect(); torch.cuda.empty_cache()
 
