@@ -33,9 +33,9 @@ FPS, SEG = 24, 5.0
 # cabeca: amplitude em graus (giro de lado, inclinação, aceno da respiração); olhar: desvio do olhar (0 = parado)
 CASOS = {
     'lutero_cranach':  dict(pts=[(556, 428), (734, 409), (690, 547), (615, 644), (777, 619)], piscadas=[1.2, 3.7],
-                            giro=2.5, incl=0.8, resp=1.0, olhar=4, camera='dolly'),
+                            giro=1.2, incl=0.5, resp=0.8, olhar=4, camera='dolly'),
     'paulo_rembrandt': dict(pts=[(261, 214), (305, 214), (288, 242), (277, 261), (302, 261)], piscadas=[1.6, 4.1],
-                            giro=2.0, incl=0.6, resp=1.2, olhar=3, camera='orbita'),
+                            giro=1.2, incl=0.5, resp=0.8, olhar=3, camera='orbita'),
     'paulo_valentin':  dict(pts=[(345, 292), (395, 290), (362, 330), (345, 352), (385, 350)], piscadas=[2.0],
                             giro=1.5, incl=0.8, resp=1.2, olhar=0, camera='orbita'),
     'latour_vela':     dict(pts=[(478, 232), (455, 235), (462, 270), (442, 292), (458, 293)], piscadas=[2.2],
@@ -130,8 +130,17 @@ def anima(nome, c):
     p0, y0, r0 = info['pitch'], info['yaw'], info['roll']
     olho0 = float(calc_eye_close_ratio(lmk[None]).mean())
     print(f'{nome}: pose original pitch {p0.item():.1f} yaw {y0.item():.1f} roll {r0.item():.1f} | olho aberto {olho0:.2f}')
-    N = int(SEG * FPS); D = SEG; quadros = []
-    for i in range(N):
+    # só o ROSTO muda: máscara do contorno do rosto (pontos 203), alargada e com borda suave; fundo, gola e chapéu
+    # ficam os da pintura (na 1a versão o giro da cabeça arrastava a gola e sujava o fundo)
+    hull = cv2.convexHull(lmk.astype(np.float32)).reshape(-1, 2); cen = hull.mean(0)
+    hull = cen + (hull - cen) * np.array([c.get('larg_mascara', 1.18), 1.22]); hull[:, 1] -= 0.04 * (hull[:, 1].max() - hull[:, 1].min())
+    fm = np.zeros((h, w), np.float32); cv2.fillPoly(fm, [hull.astype(np.int32)], 1.0)
+    tam = hull[:, 0].max() - hull[:, 0].min(); fm = cv2.GaussianBlur(fm, (0, 0), max(2.0, tam * 0.05))
+    mask = mask * fm[..., None]
+    N = int(SEG * FPS); D = SEG; quadros = [None] * N
+    # quadros que precisam ser gerados: um sim, um não (o movimento é lento) e todos perto das piscadas
+    gerar = sorted(set(range(0, N, 2)) | {N - 1} | {i for i in range(N) if any(-0.15 <= i / FPS - t0 <= 0.4 for t0 in c['piscadas'])})
+    for i in gerar:
         t = i / FPS
         dy = c['giro'] * math.sin(2 * math.pi * t / D)
         dr = c['incl'] * math.sin(2 * math.pi * t / D + 1.0)
@@ -145,7 +154,12 @@ def anima(nome, c):
         x_d = x_d + LP.retarget_eye(x_s, LP.calc_combined_eye_ratio([[alvo]], lmk))
         x_d = LP.stitching(x_s, x_d)
         out = LP.parse_output(LP.warp_decode(f_s, x_s, x_d)['out'])[0]
-        quadros.append(paste_back(out, ci['M_c2o'], img, mask))
+        quadros[i] = paste_back(out, ci['M_c2o'], img, mask)
+        if len([q for q in quadros if q is not None]) % 20 == 0: print('  quadro', i, 'de', N, flush=True)
+    for i in range(N):   # os que faltaram: média dos vizinhos (movimento de menos de 1 pixel entre eles)
+        if quadros[i] is None:
+            a = max(j for j in range(i) if quadros[j] is not None); b2 = min(j for j in range(i + 1, N) if quadros[j] is not None)
+            k = (i - a) / (b2 - a); quadros[i] = cv2.addWeighted(quadros[a], 1 - k, quadros[b2], k, 0)
     return img, quadros
 
 for nome, c in CASOS.items():
