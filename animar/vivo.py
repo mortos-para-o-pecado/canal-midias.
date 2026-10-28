@@ -75,6 +75,20 @@ def olhar_delta(delta, gx):   # mesma conta do LivePortrait (gradio_pipeline) pa
     else:      delta[0, 11, 0] += gx * 0.001;  delta[0, 15, 0] += gx * 0.0007
     return delta
 
+def olhar_y(delta, gy):   # olhar para cima (+) ou para baixo (-), com a pálpebra acompanhando (conta do LivePortrait)
+    delta[0, 11, 1] += gy * -0.001; delta[0, 15, 1] += gy * -0.001; b = -gy / 2.
+    delta[0, 11, 1] += b * -0.001; delta[0, 13, 1] += b * 0.0003; delta[0, 15, 1] += b * -0.001; delta[0, 16, 1] += b * 0.0003
+    return delta
+
+def sobrancelha(delta, e):   # levanta (+) as sobrancelhas
+    if e > 0: delta[0, 1, 1] += e * 0.001; delta[0, 2, 1] += e * -0.001
+    else: delta[0, 1, 0] += e * -0.001; delta[0, 2, 0] += e * 0.001; delta[0, 1, 1] += e * 0.0003; delta[0, 2, 1] += e * -0.0003
+    return delta
+
+def bump(t, ti, tf, sobe=0.7, desce=0.9):   # 0 -> 1 -> 0, suave (uma "ação" que vai e volta)
+    if t <= ti or t >= tf: return 0.0
+    return min(suave((t - ti) / sobe), suave((tf - t) / desce))
+
 def profundidade(img):
     S = 518; x = cv2.resize(img, (S, S), interpolation=cv2.INTER_CUBIC).astype(np.float32) / 255
     x = ((x - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]).transpose(2, 0, 1)[None].astype(np.float32)
@@ -137,6 +151,23 @@ def anima(nome, c):
     fm = np.zeros((h, w), np.float32); cv2.fillPoly(fm, [hull.astype(np.int32)], 1.0)
     tam = hull[:, 0].max() - hull[:, 0].min(); fm = cv2.GaussianBlur(fm, (0, 0), max(2.0, tam * 0.05))
     mask = mask * fm[..., None]
+    if os.environ.get('TESTE'):
+        tira = []
+        for rot, (pp, gy, ab, sb) in [('original', (0, 0, 0, 0)), ('pitch+6', (6, 0, 0, 0)), ('pitch-6', (-6, 0, 0, 0)),
+                                       ('olhar_y+15', (0, 15, 0, 0)), ('abrir+0.8', (0, 0, 0.8, 0)), ('sobrancelha+8', (0, 0, 0, 8))]:
+            R_d = get_rotation_matrix(p0 + pp, y0, r0); delta = info['exp'].clone()
+            if gy: delta = olhar_y(delta, gy)
+            if sb: delta = sobrancelha(delta, sb)
+            x_d = info['scale'] * (info['kp'] @ R_d + delta) + info['t']
+            x_d = x_d + LP.retarget_eye(x_s, LP.calc_combined_eye_ratio([[olho0 * (1 + ab)]], lmk))
+            out = LP.parse_output(LP.warp_decode(f_s, x_s, LP.stitching(x_s, x_d))['out'])[0]
+            q = paste_back(out, ci['M_c2o'], img, mask); x0, y0_, x1, y1 = cv2.boundingRect(hull.astype(np.int32))
+            cx_, cy_ = x0 + x1 // 2, y0_ + y1 // 2; r = int(max(x1, y1) * 0.75)
+            cr = q[max(0, cy_ - r):cy_ + r, max(0, cx_ - r):cx_ + r]; cr = cv2.resize(cr, (300, 300))
+            cv2.putText(cr, rot, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2); tira.append(cr)
+            print('  teste', rot, flush=True)
+        imageio.imwrite(f'vivo/{nome}_teste.png', np.concatenate(tira, 1)); print('teste pronto', flush=True)
+        return img, None
     N = int(SEG * FPS); D = SEG; quadros = [None] * N
     # quadros que precisam ser gerados: um sim, um não (o movimento é lento) e todos perto das piscadas
     gerar = sorted(set(range(0, N, 2)) | {N - 1} | {i for i in range(N) if any(-0.15 <= i / FPS - t0 <= 0.4 for t0 in c['piscadas'])})
@@ -145,12 +176,17 @@ def anima(nome, c):
         dy = c['giro'] * math.sin(2 * math.pi * t / D)
         dr = c['incl'] * math.sin(2 * math.pi * t / D + 1.0)
         dp = c['resp'] * math.sin(4 * math.pi * t / D)           # duas respirações (aceno leve)
+        lv = c.get('levanta'); bl = bump(t, lv['ti'], lv['tf']) if lv else 0.0     # ação: levanta o olhar e volta
+        if lv: dp += lv.get('pitch', 0) * bl
+        dp += c.get('pitch_fixo', 0)
         R_d = get_rotation_matrix(p0 + dp, y0 + dy, r0 + dr)
         delta = info['exp'].clone()
         if c['olhar']: delta = olhar_delta(delta, c['olhar'] * math.sin(2 * math.pi * t / D + 0.6))
+        if lv and lv.get('olhar_y'): delta = olhar_y(delta, lv['olhar_y'] * bl)
+        if lv and lv.get('sobrancelha'): delta = sobrancelha(delta, lv['sobrancelha'] * bl)
         x_d = info['scale'] * (info['kp'] @ R_d + delta) + info['t']
         b = max([piscada(t, t0) for t0 in c['piscadas']] + [0.0])
-        alvo = olho0 * (1 - 0.95 * b)
+        alvo = olho0 * (1 + (lv.get('abrir', 0) * bl if lv else 0)) * (1 - 0.95 * b)
         x_d = x_d + LP.retarget_eye(x_s, LP.calc_combined_eye_ratio([[alvo]], lmk))
         x_d = LP.stitching(x_s, x_d)
         out = LP.parse_output(LP.warp_decode(f_s, x_s, x_d)['out'])[0]
@@ -167,6 +203,7 @@ for nome, c in CASOS.items():
     t0 = time.time()
     try:
         img, qs = anima(nome, c)
+        if qs is None: continue
         grava([cv2.resize(q, (720, int(round(720 * q.shape[0] / q.shape[1] / 2)) * 2), interpolation=cv2.INTER_AREA) for q in qs], f'vivo/{nome}_rosto.mp4')
         d = profundidade(img)
         grava(camera(qs, d, c['camera'], vela=c.get('vela')), f'vivo/{nome}_cam.mp4')
