@@ -34,10 +34,13 @@ FPS, SEG = 24, 5.0
 CASOS = {
     'lutero_cranach':  dict(pts=[(556, 428), (734, 409), (690, 547), (615, 644), (777, 619)], piscadas=[1.2, 3.7],
                             giro=1.2, incl=0.5, resp=0.8, olhar=4, camera='dolly'),
-    'paulo_rembrandt': dict(pts=[(261, 214), (305, 214), (288, 242), (277, 261), (302, 261)], piscadas=[1.6, 4.1],
-                            giro=1.2, incl=0.5, resp=0.8, olhar=3, camera='orbita'),
-    'paulo_valentin':  dict(pts=[(345, 292), (395, 290), (362, 330), (345, 352), (385, 350)], piscadas=[2.0],
-                            giro=1.5, incl=0.8, resp=1.2, olhar=0, camera='orbita'),
+    'paulo_rembrandt': dict(pts=[(261, 214), (305, 214), (288, 242), (277, 261), (302, 261)], piscadas=[1.1, 4.2],
+                            giro=1.0, incl=0.5, resp=0.8, olhar=2, camera='orbita',
+                            levanta=dict(ti=2.0, tf=3.6, pitch=-2.0, abrir=0.15, sobrancelha=8)),
+    'paulo_valentin':  dict(pts=[(345, 292), (395, 290), (362, 330), (345, 352), (385, 350)], piscadas=[0.8, 4.4],
+                            giro=1.0, incl=0.5, resp=0.8, olhar=0, camera='orbita',
+                            # lendo, ele ergue a cabeça e o olhar, pensa e volta ao livro (pitch negativo = cabeça para cima)
+                            levanta=dict(ti=1.5, tf=3.9, pitch=-5.0, olhar_y=12, abrir=0.6, sobrancelha=6)),
     'latour_vela':     dict(pts=[(478, 232), (455, 235), (462, 270), (442, 292), (458, 293)], piscadas=[2.2],
                             giro=1.2, incl=0.5, resp=1.0, olhar=0, camera='orbita', vela=(0.66, 0.30)),
 }
