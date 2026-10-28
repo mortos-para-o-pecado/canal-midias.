@@ -35,6 +35,13 @@ CASOS = {
                                  piscadas=[2.6], giro=0.6, incl=0.6, resp=0.9, olhar=0),
     'lutero_cranach':       dict(img='animar/lutero_cranach.jpg', pts=[(556, 428), (734, 409), (690, 547), (615, 644), (777, 619)],
                                  piscadas=[1.2, 4.2], giro=1.2, incl=0.5, resp=0.8, olhar=4),
+    # 28/10: rostos das pinturas novas do EP03/EP04
+    'pedro_lagrimas':       dict(img='animar/pedro_lagrimas.jpg', pts=[(729, 584), (856, 546), (818, 649), (799, 730), (910, 723)],
+                                 piscadas=[1.8, 4.6], giro=0.6, incl=0.4, resp=0.8, olhar=0),
+    'scheffer_monica':      dict(img='animar/scheffer_monica.jpg', pts=[(842, 624), (929, 637), (916, 690), (878, 729), (929, 734)],
+                                 piscadas=[2.4], giro=0.5, incl=0.4, resp=0.7, olhar=0),
+    'murillo_imaculada':    dict(img='animar/murillo_imaculada.jpg', pts=[(1022, 428), (1089, 449), (1050, 482), (1022, 508), (1057, 515)],
+                                 piscadas=[1.4, 4.3], giro=0.5, incl=0.5, resp=0.8, olhar=0),
 }
 SO = [x for x in sys.argv[1:]]
 
