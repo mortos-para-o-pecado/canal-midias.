@@ -9,6 +9,12 @@ def _janela(h, w, x0, y0, x1, y1, borda):
     dx = np.maximum(np.maximum(x0 - xs, xs - x1), 0); dy = np.maximum(np.maximum(y0 - ys, ys - y1), 0)
     return np.exp(-((dx / borda) ** 2 + (dy / borda) ** 2)), xs, ys
 
+def ruido1d(t, freq, seed):
+    """Ruído suave entre -1 e 1 (valores ao acaso ligados por curva de cosseno): tremor sem ritmo fixo."""
+    r = np.random.default_rng(seed).uniform(-1, 1, 4096)
+    x = t * freq; i = int(math.floor(x)) % 4095; f = x - math.floor(x); f = (1 - math.cos(math.pi * f)) / 2
+    return float(r[i] * (1 - f) + r[i + 1] * f)
+
 class Chama:
     """Chama de vela: balança de lado (mais na ponta), estica e encolhe um pouco, e pisca de brilho."""
     def __init__(self, shape, caixa, base_y, ponta_y, amp=3.0, seed=1):
@@ -24,8 +30,25 @@ class Chama:
         estica = 0.05 * math.sin(2 * math.pi * 2.3 * t + f[2]) + 0.03 * math.sin(2 * math.pi * 5.3 * t + f[3])
         dy = (self.ys - self.base_y) * estica                        # estica a partir da base
         return lado * self.jan, dy * self.jan
+    def sinal(self, t):
+        # tremor da luz entre -1 e 1: duas ondas + ruído lento (respiro da chama) + ruído rápido (estalo)
+        return (0.30 * math.sin(2 * math.pi * 2.9 * t + self.fase[0]) + 0.15 * math.sin(2 * math.pi * 7.1 * t + self.fase[2])
+                + 0.35 * ruido1d(t, 3.0, 11) + 0.20 * ruido1d(t, 9.0, 12))
     def brilho(self, t):
-        return 1 + 0.06 * math.sin(2 * math.pi * 2.9 * t + self.fase[0]) + 0.04 * math.sin(2 * math.pi * 7.1 * t + self.fase[2])
+        return 1 + 0.10 * self.sinal(t)
+
+class Clarao:
+    """Luz da vela que pulsa no que ela ilumina (rosto, colo, mangas, parede), no canal de luminosidade (LAB):
+    não move nenhum pixel, só respira a claridade junto com a chama. Mais forte perto da vela e nas áreas claras."""
+    def __init__(self, img, centro, raio, forca=0.04):
+        h, w = img.shape[:2]; ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        perto = np.exp(-(((xs - centro[0]) ** 2 + (ys - centro[1]) ** 2) / raio ** 2))
+        lum = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255, (0, 0), 12)
+        self.mapa = (forca * perto * np.clip(lum / max(1e-3, np.percentile(lum, 99)), 0, 1) ** 0.8).astype(np.float32)
+    def aplica(self, q, s):
+        lab = cv2.cvtColor(q, cv2.COLOR_RGB2LAB).astype(np.float32)
+        lab[..., 0] = np.clip(lab[..., 0] * (1 + s * self.mapa), 0, 255)
+        return cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
 
 class Fumaca:
     """Fio de fumaça: ondula devagar, mais solto no alto."""
@@ -67,15 +90,17 @@ class Poeira:
 def aplica_campos(q, efeitos, t):
     """Soma os deslocamentos dos efeitos e aplica de uma vez; depois o brilho da chama e a poeira."""
     h, w = q.shape[:2]
-    dx = np.zeros((h, w), np.float32); dy = np.zeros((h, w), np.float32); jan_brilho = None; fator = 1.0
+    dx = np.zeros((h, w), np.float32); dy = np.zeros((h, w), np.float32); jan_brilho = None; fator = 1.0; sinal = 0.0
     for e in efeitos:
         if hasattr(e, 'campo'):
             a, b = e.campo(t); dx += a; dy += b
-        if isinstance(e, Chama): jan_brilho, fator = e.jan, e.brilho(t)
+        if isinstance(e, Chama): jan_brilho, fator, sinal = e.jan, e.brilho(t), e.sinal(t)
     xs, ys = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
     r = cv2.remap(q, xs - dx, ys - dy, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT) if np.abs(dx).max() + np.abs(dy).max() > 0 else q
     if jan_brilho is not None:
         r = np.clip(r.astype(np.float32) * (1 + (fator - 1) * jan_brilho[..., None]), 0, 255).astype(np.uint8)
+    for e in efeitos:
+        if isinstance(e, Clarao): r = e.aplica(r, sinal)
     for e in efeitos:
         if isinstance(e, Poeira): r = e.aplica(r, t)
     return r

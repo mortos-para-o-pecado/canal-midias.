@@ -3,12 +3,13 @@
 import argparse, json, math, subprocess, sys, os
 import numpy as np, cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from efeitos import Chama, Fumaca, Poeira, aplica_campos
+from efeitos import Chama, Fumaca, Poeira, Clarao, aplica_campos
 
 CENAS = {   # coordenadas na imagem original
     'latour_vela': dict(camera='orbita', forca=1.0,
                         chama=dict(caixa=(645, 295, 685, 412), base_y=410, ponta_y=300, amp=3.5),
-                        fumaca=dict(caixa=(630, 90, 700, 300), amp=5.0)),
+                        fumaca=dict(caixa=(630, 90, 700, 300), amp=5.0),
+                        clarao=dict(centro=(665, 345), raio=430, forca=0.045)),   # coordenadas na pintura em 1004x1280
     'paulo_valentin': dict(camera='orbita', forca=1.0, poeira=dict(n=60, caixa=(250, 0, 1073, 700))),
     'lutero_cranach': dict(camera='dolly', forca=1.0),
     'paulo_rembrandt': dict(camera='orbita', forca=1.0, poeira=dict(n=40, caixa=(0, 0, 685, 500))),
@@ -52,6 +53,7 @@ if __name__ == '__main__':
     if 'chama' in c: efeitos.append(Chama(img.shape, **c['chama']))
     if 'fumaca' in c: efeitos.append(Fumaca(img.shape, **c['fumaca']))
     if 'poeira' in c: efeitos.append(Poeira(img, **c['poeira']))
+    if 'clarao' in c: efeitos.append(Clarao(img, **c['clarao']))
     d, H = prepara_prof(a.prof, a.larg, img.shape)
     W = a.larg if not a.sem_camera else a.larg
     cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{a.larg}x{H}', '-r', str(a.fps), '-i', '-',
