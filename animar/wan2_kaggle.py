@@ -3,6 +3,10 @@
 # Aqui: só o primeiro quadro (a pintura), um gesto claro por cena (levantar a cabeça, erguer a mão, a chama dançar,
 # o tecido se mexer), câmera lenta permitida, e três amostradores: os 2 primeiros passos do modelo de ruído alto SEM o LoRA
 # de 4 passos (com CFG 3,5, que é o que dá movimento) e depois o LoRA Lightx2v para acabar rápido.
+# Versão 3 (29/10, depois do teste 2): o teste 2 deu MOVIMENTO DE VERDADE (La Tour: a mão sai do queixo e vai à caveira,
+# a cabeça se ergue e vira para a vela), mas levou 60 min por clipe a 656x832x81 e o ComfyUI morreu por falta de memória no
+# segundo clipe. Agora: lado maior 640, 49 quadros (3 s), 4 passos (1 sem LoRA + 3 com LoRA), câmera parada (a pintura viva
+# é colada sobre a pintura nítida, só onde se mexe) e o ComfyUI reiniciado a cada clipe.
 # Saídas em /kaggle/working: <nome>.mp4 (16 qps), <nome>_tira.jpg, <nome>_mov.txt (quanto cada quadro se mexeu), log.txt.
 # Nenhuma chave ou senha: tudo vem de repositórios públicos.
 import os, sys, re, json, time, glob, shutil, subprocess, urllib.request
@@ -29,12 +33,38 @@ def sh(cmd, ok_fail=False):
 NEG = ('色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，'
        '多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走, '
        'morphing face, changing face, different person, deformed hands, extra fingers, melting, warping, text, watermark, '
-       'photorealistic photo, 3d render, cartoon, frozen still image')
+       'photorealistic photo, photograph, smooth plastic skin, 3d render, cartoon, frozen still image, camera movement, zoom, pan, '
+       'darkening, fading to black, flicker')
 ESTILO = (' Keep it a classical oil painting: same colors, same brushstrokes, same canvas texture, same face and same person. '
-          'Natural, smooth, clearly visible motion. Slow cinematic camera push-in.')
+          'Natural, smooth, clearly visible motion of the figures, same lighting. The camera does not move.')
 
 CENAS = [
-    dict(nome='latour_vida', img='latour_vela.jpg', seed=11,
+    dict(nome='pedro_negacao_vida', img='pedro_negacao.jpg', seed=51,
+         pos='Rembrandt painting of the Denial of Peter comes to life. The servant girl holds up the candle and points at Peter, '
+             'accusing him. Peter lifts his open hand and slowly shakes his head in denial, his eyes widen. The soldier in armor turns '
+             'his head toward Peter. The candlelight flickers warmly on their faces and on the white cloak.'),
+    dict(nome='paulo_prisao_vida', img='paulo_prisao.jpg', seed=61,
+         pos='Rembrandt painting of the old apostle Paul in prison comes to life. Paul lowers his hand from his white beard, takes '
+             'the quill and writes on the page of the open book, his head nods slowly as he thinks. The beam of sunlight from the '
+             'window shimmers on the wall and dust floats in the light.'),
+    dict(nome='moises_vida', img='moises_lei.jpg', seed=71,
+         pos='Rembrandt painting of Moses with the Ten Commandments comes to life. Moses slowly raises the two stone tablets of the '
+             'Law higher above his head with both hands, his face fills with grief, his arms tremble under the weight, his white '
+             'sleeves and his beard move.'),
+    dict(nome='belsazar_vida', img='belsazar.jpg', seed=81,
+         pos='Rembrandt painting of Belshazzar\'s Feast comes to life. The glowing hand on the dark wall moves as it writes, the '
+             'shining letters glow brighter. The king turns in terror and pulls back, his golden robe shimmers. The guests recoil '
+             'in fear and wine spills from the golden cup.'),
+    dict(nome='mateus_vida', img='caravaggio_mateus.jpg', seed=91,
+         pos='Caravaggio painting of the Calling of Saint Matthew comes to life. Christ, on the right, extends his arm and points '
+             'at Matthew. The bearded Matthew at the table raises his head and points at himself in surprise. The young men at the '
+             'table turn to look. The beam of light on the wall slowly brightens and coins glint on the table.'),
+    dict(nome='paulo_cartas_vida', img='valentin_epistolas.jpg', seed=101,
+         pos='Baroque painting of the apostle Paul writing his letters comes to life. Paul writes with the quill across the page, '
+             'his hand moves steadily, he lifts his eyes to think and then looks down again at the letter. His red cloak moves '
+             'gently and warm light shimmers on the papers.'),
+    # feito no teste 2 (versão 6): latour_vida
+    dict(nome='latour_vida_x', img='latour_vela.jpg', seed=11,
          pos='Georges de La Tour candlelit painting comes to life. The young woman slowly lifts her head from her hand and turns her eyes '
              'toward the candle, her fingers move on the skull in her lap. The candle flame dances and flickers strongly, a thin line of '
              'smoke rises and curls, warm light pulses on her face, sleeves and the wall.'),
@@ -52,7 +82,7 @@ CENAS = [
              'the ivy leaves behind him tremble in a light breeze.'),
 ]
 
-def dims(path, lado=832):
+def dims(path, lado=640):
     import cv2
     h, w = cv2.imread(path).shape[:2]
     if w >= h: W, H = lado, int(round(lado * h / w / 16)) * 16
@@ -94,7 +124,7 @@ def prepara():
     return m
 
 def fluxo(m, c):
-    S = 6   # passos: 0-2 alto SEM LoRA (CFG 3,5: movimento), 2-4 alto COM LoRA, 4-6 baixo COM LoRA (detalhe)
+    S = 4   # passos: 0-1 alto SEM LoRA (CFG 3,5: movimento), 1-2 alto COM LoRA, 2-4 baixo COM LoRA (detalhe)
     return {
         '1': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': m['alto']}},
         '2': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': m['baixo']}},
@@ -109,16 +139,16 @@ def fluxo(m, c):
         '10': {'class_type': 'VAELoader', 'inputs': {'vae_name': m['vae']}},
         '11': {'class_type': 'LoadImage', 'inputs': {'image': c['img']}},
         '12': {'class_type': 'WanImageToVideo', 'inputs': {'positive': ['8', 0], 'negative': ['9', 0], 'vae': ['10', 0],
-               'width': c['w'], 'height': c['h'], 'length': 81, 'batch_size': 1, 'start_image': ['11', 0]}},
+               'width': c['w'], 'height': c['h'], 'length': 49, 'batch_size': 1, 'start_image': ['11', 0]}},
         '13': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['17', 0], 'add_noise': 'enable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 3.5, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
-               'latent_image': ['12', 2], 'start_at_step': 0, 'end_at_step': 2, 'return_with_leftover_noise': 'enable'}},
+               'latent_image': ['12', 2], 'start_at_step': 0, 'end_at_step': 1, 'return_with_leftover_noise': 'enable'}},
         '14': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['5', 0], 'add_noise': 'disable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
-               'latent_image': ['13', 0], 'start_at_step': 2, 'end_at_step': 4, 'return_with_leftover_noise': 'enable'}},
+               'latent_image': ['13', 0], 'start_at_step': 1, 'end_at_step': 2, 'return_with_leftover_noise': 'enable'}},
         '15': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['6', 0], 'add_noise': 'disable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
-               'latent_image': ['14', 0], 'start_at_step': 4, 'end_at_step': S, 'return_with_leftover_noise': 'disable'}},
+               'latent_image': ['14', 0], 'start_at_step': 2, 'end_at_step': S, 'return_with_leftover_noise': 'disable'}},
         '16': {'class_type': 'VAEDecode', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0]}},
         '18': {'class_type': 'SaveImage', 'inputs': {'images': ['16', 0], 'filename_prefix': c['nome']}},
     }
@@ -162,14 +192,23 @@ def finaliza(c):
         mag = np.linalg.norm(fl, axis=2); mov.append((i, float(mag.mean()), float(np.percentile(mag, 95))))
     open(f'{OUT}/{c["nome"]}_mov.txt', 'w').write('\n'.join(f'{i} media {a:.2f} p95 {b:.2f}' for i, a, b in mov))
     log(c['nome'], 'movimento até o fim: média %.1f px, p95 %.1f px' % (mov[-1][1], mov[-1][2]))
-    sel = [0, 20, 40, 60, 80] if len(q) > 80 else list(range(0, len(q), max(1, len(q) // 5)))
+    sel = [0, 12, 24, 36, 48] if len(q) == 49 else list(range(0, len(q), max(1, len(q) // 5)))
     tira = np.hstack([cv2.putText(q[i].copy(), str(i), (8, 30), 0, 1, (0, 255, 255), 2) for i in sel])
     cv2.imwrite(f'{OUT}/{c["nome"]}_tira.jpg', tira, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
 if __name__ == '__main__':
     so = sys.argv[1:]
-    m = prepara(); srv = servidor()
+    m = prepara(); T0 = time.time()
     for c in CENAS:
         if so and c['nome'] not in so: continue
-        if gera(m, c): finaliza(c)
-    srv.terminate(); log('FIM')
+        if c['nome'].endswith('_x'): continue
+        if time.time() - T0 > 3.2 * 3600: log('limite de tempo desta versão: parando antes de', c['nome']); break
+        srv = servidor()    # um ComfyUI novo por clipe (no teste 2 o segundo clipe morreu por falta de memória)
+        try:
+            if gera(m, c): finaliza(c)
+        except Exception as e: log('falhou', c['nome'], repr(e)[:500])
+        srv.terminate()
+        try: srv.wait(timeout=60)
+        except Exception: pass
+        sh('pkill -f "[m]ain.py --listen" || true', ok_fail=True); time.sleep(5)
+    log('FIM')
