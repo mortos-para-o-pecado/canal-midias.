@@ -90,43 +90,49 @@ FEITAS = [   # versões 6 e 7 (29-30/10): já geradas; aprovada só paulo_cartas
              'rolls down his cheek, he presses his clasped hands together, he breathes deeply, his blue robe and yellow cloak move gently, '
              'the ivy leaves behind him tremble in a light breeze.'),
 ]
+# Versão 6 (30/10 tarde, teste A/B do autor: imagens de IA realistas no EP07; autor: "as imagens não foram animadas!?"):
+# cenas fotorrealistas geradas no Gemini; estilo e negativo próprios (o negativo das pinturas manda FUGIR de foto).
+# As cenas da versão 5 (leitora_olha, paulo_nega, mateus_luz, latour_sozinha, pentecostes_fogo, ana_le, paulo_prisao_ab) já foram feitas.
+ESTILO_REAL = (' Cinematic realistic film footage, natural lighting, same person, same face, same clothes, consistent details. '
+               'Natural, smooth, clearly visible motion. The camera does not move.')
+NEG_REAL = ('色调艳丽，过曝，静态，细节模糊不清，字幕，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，'
+            '多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，倒着走, '
+            'morphing face, changing face, different person, deformed hands, extra fingers, melting, warping, text, watermark, '
+            'cartoon, 3d render, painting, frozen still image, camera movement, zoom, pan, darkening, fading to black, flicker, blur')
+R = dict(estilo=ESTILO_REAL, neg=NEG_REAL)
 CENAS = [
-    # frase -> intenção -> gesto (sem mão). Cada cena diz em que frase do roteiro entra.
-    # EP07 "Abre a sua Bíblia em Romanos 7." / EP08 "Pega a sua Bíblia. ... Conta na sua." -> falar com quem assiste
-    dict(nome='leitora_olha', img='dou_leitora.jpg', seed=111,
-         pos='Gerrit Dou painting of an old woman reading a large Bible comes to life. She slowly lifts her eyes from the page and '
-             'looks directly at the viewer, her head rises a little, calm and serious. Her hands stay still on the open book. '
-             'The pages of the book barely move, the warm light on her face and on the fur collar stays the same.'),
-    # EP07 "E não fui eu que mudei." / "Nem por quem discorda de mim." / EP08 "Zero. Nenhuma." -> negar
-    dict(nome='paulo_nega', img='paulo_rembrandt.jpg', seed=121,
-         pos='Rembrandt painting of the old apostle Paul at his desk comes to life. Looking at the viewer, the old man slowly shakes '
-             'his head from side to side in a calm, grave "no", his long white beard and hair sway gently with the movement, his '
-             'eyebrows lower. His hands stay still on the open book. The light on his face stays warm.'),
-    # EP08 "No capítulo 8, entra Alguém." -> luz/graça que entra
-    dict(nome='mateus_luz', img='caravaggio_mateus.jpg', seed=131,
-         pos='Caravaggio painting of the Calling of Saint Matthew comes to life. The beam of light coming from the upper right slowly '
-             'grows brighter and warmer across the dark wall and over the table, dust floats in the beam. The men at the table '
-             'slowly turn their heads toward the light. Everyone keeps their hands still. Christ on the right stands still.'),
-    # EP08 "É um homem sozinho, com a lei e com o pecado." / "No capítulo 7, o homem tenta tudo sozinho." -> solidão, tempo
-    dict(nome='latour_sozinha', img='latour_vela.jpg', seed=141,
-         pos='Georges de La Tour candlelit painting comes to life. The candle flame flickers and dances, a thin line of smoke rises '
-             'and curls in the dark, the warm light pulses softly on her face and on the wall. The young woman slowly closes her '
-             'eyes and lowers her head a little, in silence. Her hands stay still.'),
-    # EP08 "E logo depois, dezenove vezes o Espírito." / "o Espírito de Deus habita em vós" -> luz/graça
-    dict(nome='pentecostes_fogo', img='pentecostes.jpg', seed=151,
-         pos='El Greco painting of Pentecost comes to life. The small tongues of fire above the heads of the apostles and of Mary '
-             'flicker and glow brighter, the white light of the dove at the top pulses and spreads, the colored robes shimmer. '
-             'The faces and hands of the people stay the same and still.'),
-    # EP07 "Vamos ler devagar." / "Verso 7: ..." -> ler um texto
-    dict(nome='ana_le', img='rembrandt_ana.jpg', seed=161,
-         pos='Rembrandt painting of an old woman reading a large book comes to life. Her eyes move slowly along the lines of the page '
-             'from left to right, her head nods very slightly as she reads, her lips stay closed. Her hand stays still on the page. '
-             'The warm light on the page and on her red cloak stays the same.'),
-    # TESTE A/B da trama no cabelo (mesmo pedido e semente da versão 7, receita do estudo de 30/10)
-    dict(nome='paulo_prisao_ab', img='paulo_prisao.jpg', seed=61, passos=8, lora=0.55, cfg=2.2, shift=3.5, sobrepor=128,
-         pos='Rembrandt painting of the old apostle Paul in prison comes to life. Paul lowers his hand from his white beard, takes '
-             'the quill and writes on the page of the open book, his head nods slowly as he thinks. The beam of sunlight from the '
-             'window shimmers on the wall and dust floats in the light.'),
+    # EP07 "Romanos 7, verso 14. Aqui o capítulo muda." / "Faço. Quero. Vejo. Sirvo." -> Paulo encara quem assiste
+    dict(nome='ia_paulo_rosto_vida', img='ia_paulo_rosto.jpg', seed=201, **R,
+         pos='Close-up of an old bearded man with a bald head in a dark stone room, looking straight at the camera. He blinks slowly, '
+             'takes a calm breath and gives a slight serious nod, his eyes stay on the viewer. The oil lamp flame on the left flickers.'),
+    # EP07 "o afogado se debate, engole água" -> debater-se na água
+    dict(nome='ia_afogado_vida', img='ia_afogado.jpg', seed=211, **R,
+         pos='A man drowning in a dark stormy sea at night struggles in the water, his raised arm thrashes, waves crash around his '
+             'head and splash, his head sinks a little and comes back up gasping, lightning flashes in the distant sky.'),
+    # EP07 "Do 14 ao 25, DESCREVE como é viver lá dentro" / "o homem debaixo da lei" -> preso que tenta sair
+    dict(nome='ia_preso_grade_vida', img='ia_preso_grade.jpg', seed=221, **R,
+         pos='A bearded man in an ancient prison grips the iron bars with both hands, pulls and shakes them hard, then lowers his '
+             'head in anguish and breathes heavily. The bars stay in place. Cold light from the side.'),
+    # EP07 "tudo é contado no passado" / "Quando você conta uma história" -> contar história
+    dict(nome='ia_contador_historia_vida', img='ia_contador_historia.jpg', seed=231, **R,
+         pos='An old man with a white beard tells a story by the campfire at night, he moves his hands expressively as he speaks, '
+             'the children around the fire listen and look at him, the flames dance and sparks rise into the dark air.'),
+    # EP07 "passado ... presente" / "Tempo de verbo" -> o tempo correndo
+    dict(nome='ia_ampulheta_vida', img='ia_ampulheta.jpg', seed=241, **R,
+         pos='The sand falls steadily through the narrow neck of an antique wooden hourglass, the sand in the bottom slowly piles up, '
+             'the flame of the oil lamp beside it flickers gently. Nothing else moves.'),
+    # EP07 "carnal. Vendido. Preso." -> as correntes
+    dict(nome='ia_algemas_mesa_vida', img='ia_algemas_mesa.jpg', seed=251, **R,
+         pos='Close-up of two rough male hands shackled with old iron cuffs resting on a wooden table, the fingers slowly clench into '
+             'fists and the short chain between the cuffs tightens and rattles. Warm side light.'),
+    # EP07 "O homem é o mesmo dos dois lados da linha: o homem debaixo da lei" -> o preso levanta o rosto
+    dict(nome='ia_preso_cela_vida', img='ia_preso_cela.jpg', seed=261, **R,
+         pos='A chained man sitting on the floor of a dark stone cell slowly raises his head toward the beam of light from the small '
+             'high window, dust floats and drifts in the beam of light, his chains move slightly.'),
+    # EP07 "Tem uma palavra que falta ... Próximo episódio: O HOMEM SEM O ESPÍRITO" -> o vento (o Espírito, sem figura)
+    dict(nome='ia_vento_janela_vida', img='ia_vento_janela.jpg', seed=271, **R,
+         pos='A strong wind blows in through the window of an ancient stone room at night, the linen curtains billow and fly into the '
+             'room, the flame of the oil lamp bends and flickers, golden dust swirls in the air.'),
 ]
 
 def dims(path, lado=640):
@@ -182,8 +188,8 @@ def fluxo(m, c):
         '6': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['4', 0], 'shift': c.get('shift', 5.0)}},
         '17': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['1', 0], 'shift': c.get('shift', 5.0)}},
         '7': {'class_type': 'CLIPLoader', 'inputs': {'clip_name': m['texto'], 'type': 'wan', 'device': 'default'}},
-        '8': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['7', 0], 'text': c['pos'] + ESTILO}},
-        '9': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['7', 0], 'text': NEG}},
+        '8': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['7', 0], 'text': c['pos'] + c.get('estilo', ESTILO)}},
+        '9': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['7', 0], 'text': c.get('neg', NEG)}},
         '10': {'class_type': 'VAELoader', 'inputs': {'vae_name': m['vae']}},
         '11': {'class_type': 'LoadImage', 'inputs': {'image': c['img']}},
         '12': {'class_type': 'WanImageToVideo', 'inputs': {'positive': ['8', 0], 'negative': ['9', 0], 'vae': ['10', 0],
