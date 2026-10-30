@@ -9,6 +9,10 @@
 # é colada sobre a pintura nítida, só onde se mexe) e o ComfyUI reiniciado a cada clipe.
 # Versão 4 (29/10 noite, estudo no Gemini Pro; regra do autor: "se o estudo diz o contrário, fica o estudo"): shift 5,
 # CFG 2,5 no passo sem LoRA, LoRA a 0,7, negativo sem "pintura/obra/estilo", textura de óleo no positivo, VAE em ladrilhos.
+# Versão 5 (30/10, regra do autor: "o movimento tem que fazer sentido com a narração e com o vídeo"; estudo no Gemini Pro
+# "animar com sentido"): cada cena nasce de uma FRASE do roteiro (frase -> intenção -> gesto -> pintura), gesto pequeno e sem mão
+# (olhar, cabeça, olhos, luz, chama, fumaça). Teste A/B da trama no cabelo (Paulo na prisão): 8 passos, LoRA 0,55, CFG 2,2,
+# shift 3,5, ladrilho do VAE com sobreposição 128.
 # Saídas em /kaggle/working: <nome>.mp4 (16 qps), <nome>_tira.jpg, <nome>_mov.txt (quanto cada quadro se mexeu), log.txt.
 # Nenhuma chave ou senha: tudo vem de repositórios públicos.
 import os, sys, re, json, time, glob, shutil, subprocess, urllib.request
@@ -43,7 +47,7 @@ ESTILO = (' Keep it a classical oil painting with oil painting texture, visible 
           'brushstrokes, same canvas texture, same face and same person. '
           'Natural, smooth, clearly visible motion of the figures, same lighting. The camera does not move.')
 
-CENAS = [
+FEITAS = [   # versões 6 e 7 (29-30/10): já geradas; aprovada só paulo_cartas_vida
     dict(nome='pedro_negacao_vida', img='pedro_negacao.jpg', seed=51,
          pos='Rembrandt painting of the Denial of Peter comes to life. The servant girl holds up the candle and points at Peter, '
              'accusing him. Peter lifts his open hand and slowly shakes his head in denial, his eyes widen. The soldier in armor turns '
@@ -85,6 +89,44 @@ CENAS = [
          pos='El Greco painting of the repentant Saint Peter comes to life. The old apostle lifts his tearful eyes to heaven, a tear '
              'rolls down his cheek, he presses his clasped hands together, he breathes deeply, his blue robe and yellow cloak move gently, '
              'the ivy leaves behind him tremble in a light breeze.'),
+]
+CENAS = [
+    # frase -> intenção -> gesto (sem mão). Cada cena diz em que frase do roteiro entra.
+    # EP07 "Abre a sua Bíblia em Romanos 7." / EP08 "Pega a sua Bíblia. ... Conta na sua." -> falar com quem assiste
+    dict(nome='leitora_olha', img='dou_leitora.jpg', seed=111,
+         pos='Gerrit Dou painting of an old woman reading a large Bible comes to life. She slowly lifts her eyes from the page and '
+             'looks directly at the viewer, her head rises a little, calm and serious. Her hands stay still on the open book. '
+             'The pages of the book barely move, the warm light on her face and on the fur collar stays the same.'),
+    # EP07 "E não fui eu que mudei." / "Nem por quem discorda de mim." / EP08 "Zero. Nenhuma." -> negar
+    dict(nome='paulo_nega', img='paulo_rembrandt.jpg', seed=121,
+         pos='Rembrandt painting of the old apostle Paul at his desk comes to life. Looking at the viewer, the old man slowly shakes '
+             'his head from side to side in a calm, grave "no", his long white beard and hair sway gently with the movement, his '
+             'eyebrows lower. His hands stay still on the open book. The light on his face stays warm.'),
+    # EP08 "No capítulo 8, entra Alguém." -> luz/graça que entra
+    dict(nome='mateus_luz', img='caravaggio_mateus.jpg', seed=131,
+         pos='Caravaggio painting of the Calling of Saint Matthew comes to life. The beam of light coming from the upper right slowly '
+             'grows brighter and warmer across the dark wall and over the table, dust floats in the beam. The men at the table '
+             'slowly turn their heads toward the light. Everyone keeps their hands still. Christ on the right stands still.'),
+    # EP08 "É um homem sozinho, com a lei e com o pecado." / "No capítulo 7, o homem tenta tudo sozinho." -> solidão, tempo
+    dict(nome='latour_sozinha', img='latour_vela.jpg', seed=141,
+         pos='Georges de La Tour candlelit painting comes to life. The candle flame flickers and dances, a thin line of smoke rises '
+             'and curls in the dark, the warm light pulses softly on her face and on the wall. The young woman slowly closes her '
+             'eyes and lowers her head a little, in silence. Her hands stay still.'),
+    # EP08 "E logo depois, dezenove vezes o Espírito." / "o Espírito de Deus habita em vós" -> luz/graça
+    dict(nome='pentecostes_fogo', img='pentecostes.jpg', seed=151,
+         pos='El Greco painting of Pentecost comes to life. The small tongues of fire above the heads of the apostles and of Mary '
+             'flicker and glow brighter, the white light of the dove at the top pulses and spreads, the colored robes shimmer. '
+             'The faces and hands of the people stay the same and still.'),
+    # EP07 "Vamos ler devagar." / "Verso 7: ..." -> ler um texto
+    dict(nome='ana_le', img='rembrandt_ana.jpg', seed=161,
+         pos='Rembrandt painting of an old woman reading a large book comes to life. Her eyes move slowly along the lines of the page '
+             'from left to right, her head nods very slightly as she reads, her lips stay closed. Her hand stays still on the page. '
+             'The warm light on the page and on her red cloak stays the same.'),
+    # TESTE A/B da trama no cabelo (mesmo pedido e semente da versão 7, receita do estudo de 30/10)
+    dict(nome='paulo_prisao_ab', img='paulo_prisao.jpg', seed=61, passos=8, lora=0.55, cfg=2.2, shift=3.5, sobrepor=128,
+         pos='Rembrandt painting of the old apostle Paul in prison comes to life. Paul lowers his hand from his white beard, takes '
+             'the quill and writes on the page of the open book, his head nods slowly as he thinks. The beam of sunlight from the '
+             'window shimmers on the wall and dust floats in the light.'),
 ]
 
 def dims(path, lado=640):
@@ -129,7 +171,8 @@ def prepara():
     return m
 
 def fluxo(m, c):
-    S = 4   # passos: 0-1 alto SEM LoRA (CFG 3,5: movimento), 1-2 alto COM LoRA, 2-4 baixo COM LoRA (detalhe)
+    S = c.get('passos', 4)   # passos: 0-1 alto SEM LoRA (movimento), 1-S/2 alto COM LoRA, S/2-S baixo COM LoRA (detalhe)
+    M = max(2, S // 2)
     return {
         '1': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': m['alto']}},
         '2': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': m['baixo']}},
@@ -150,11 +193,11 @@ def fluxo(m, c):
                'latent_image': ['12', 2], 'start_at_step': 0, 'end_at_step': 1, 'return_with_leftover_noise': 'enable'}},
         '14': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['5', 0], 'add_noise': 'disable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
-               'latent_image': ['13', 0], 'start_at_step': 1, 'end_at_step': 2, 'return_with_leftover_noise': 'enable'}},
+               'latent_image': ['13', 0], 'start_at_step': 1, 'end_at_step': M, 'return_with_leftover_noise': 'enable'}},
         '15': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['6', 0], 'add_noise': 'disable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
-               'latent_image': ['14', 0], 'start_at_step': 2, 'end_at_step': S, 'return_with_leftover_noise': 'disable'}},
-        '16': ({'class_type': 'VAEDecodeTiled', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0], 'tile_size': 512, 'overlap': 64,
+               'latent_image': ['14', 0], 'start_at_step': M, 'end_at_step': S, 'return_with_leftover_noise': 'disable'}},
+        '16': ({'class_type': 'VAEDecodeTiled', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0], 'tile_size': 512, 'overlap': c.get('sobrepor', 64),
                 'temporal_size': 64, 'temporal_overlap': 8}} if c.get('ladrilho', True) else
                {'class_type': 'VAEDecode', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0]}}),
         '18': {'class_type': 'SaveImage', 'inputs': {'images': ['16', 0], 'filename_prefix': c['nome']}},
