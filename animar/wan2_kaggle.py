@@ -7,6 +7,8 @@
 # a cabeça se ergue e vira para a vela), mas levou 60 min por clipe a 656x832x81 e o ComfyUI morreu por falta de memória no
 # segundo clipe. Agora: lado maior 640, 49 quadros (3 s), 4 passos (1 sem LoRA + 3 com LoRA), câmera parada (a pintura viva
 # é colada sobre a pintura nítida, só onde se mexe) e o ComfyUI reiniciado a cada clipe.
+# Versão 4 (29/10 noite, estudo no Gemini Pro; regra do autor: "se o estudo diz o contrário, fica o estudo"): shift 5,
+# CFG 2,5 no passo sem LoRA, LoRA a 0,7, negativo sem "pintura/obra/estilo", textura de óleo no positivo, VAE em ladrilhos.
 # Saídas em /kaggle/working: <nome>.mp4 (16 qps), <nome>_tira.jpg, <nome>_mov.txt (quanto cada quadro se mexeu), log.txt.
 # Nenhuma chave ou senha: tudo vem de repositórios públicos.
 import os, sys, re, json, time, glob, shutil, subprocess, urllib.request
@@ -29,13 +31,16 @@ def sh(cmd, ok_fail=False):
         log('ERRO', r.stdout[-1500:], r.stderr[-1500:]); raise SystemExit(1)
     return r.stdout
 
-# negativo padrão do Wan (inclui "estático", "parado", "imagem parada") + o que estraga pintura
-NEG = ('色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，'
+# negativo padrão do Wan (inclui "estático", "parado", "imagem parada") + o que estraga pintura.
+# 29/10 (versão 4): TIRADOS do negativo padrão "风格，作品，画作，画面" (estilo, obra, PINTURA, quadro): o negativo oficial manda o
+# modelo FUGIR de pintura, e isso empurra o rosto para "foto" (foi o que se viu no La Tour da versão 6).
+NEG = ('色调艳丽，过曝，静态，细节模糊不清，字幕，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，'
        '多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走, '
        'morphing face, changing face, different person, deformed hands, extra fingers, melting, warping, text, watermark, '
        'photorealistic photo, photograph, smooth plastic skin, 3d render, cartoon, frozen still image, camera movement, zoom, pan, '
-       'darkening, fading to black, flicker')
-ESTILO = (' Keep it a classical oil painting: same colors, same brushstrokes, same canvas texture, same face and same person. '
+       'darkening, fading to black, flicker, hyperrealistic skin, smooth skin, dark frame, color fade, digital art, blur')
+ESTILO = (' Keep it a classical oil painting with oil painting texture, visible brushstrokes and impasto: same colors, same '
+          'brushstrokes, same canvas texture, same face and same person. '
           'Natural, smooth, clearly visible motion of the figures, same lighting. The camera does not move.')
 
 CENAS = [
@@ -128,11 +133,11 @@ def fluxo(m, c):
     return {
         '1': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': m['alto']}},
         '2': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': m['baixo']}},
-        '3': {'class_type': 'LoraLoaderModelOnly', 'inputs': {'model': ['1', 0], 'lora_name': m['lora_alto'], 'strength_model': 1.0}},
-        '4': {'class_type': 'LoraLoaderModelOnly', 'inputs': {'model': ['2', 0], 'lora_name': m['lora_baixo'], 'strength_model': 1.0}},
-        '5': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['3', 0], 'shift': 8.0}},
-        '6': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['4', 0], 'shift': 8.0}},
-        '17': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['1', 0], 'shift': 8.0}},
+        '3': {'class_type': 'LoraLoaderModelOnly', 'inputs': {'model': ['1', 0], 'lora_name': m['lora_alto'], 'strength_model': c.get('lora', 0.7)}},
+        '4': {'class_type': 'LoraLoaderModelOnly', 'inputs': {'model': ['2', 0], 'lora_name': m['lora_baixo'], 'strength_model': c.get('lora', 0.7)}},
+        '5': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['3', 0], 'shift': c.get('shift', 5.0)}},
+        '6': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['4', 0], 'shift': c.get('shift', 5.0)}},
+        '17': {'class_type': 'ModelSamplingSD3', 'inputs': {'model': ['1', 0], 'shift': c.get('shift', 5.0)}},
         '7': {'class_type': 'CLIPLoader', 'inputs': {'clip_name': m['texto'], 'type': 'wan', 'device': 'default'}},
         '8': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['7', 0], 'text': c['pos'] + ESTILO}},
         '9': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['7', 0], 'text': NEG}},
@@ -141,7 +146,7 @@ def fluxo(m, c):
         '12': {'class_type': 'WanImageToVideo', 'inputs': {'positive': ['8', 0], 'negative': ['9', 0], 'vae': ['10', 0],
                'width': c['w'], 'height': c['h'], 'length': 49, 'batch_size': 1, 'start_image': ['11', 0]}},
         '13': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['17', 0], 'add_noise': 'enable', 'noise_seed': c['seed'], 'steps': S,
-               'cfg': 3.5, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
+               'cfg': c.get('cfg', 2.5), 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
                'latent_image': ['12', 2], 'start_at_step': 0, 'end_at_step': 1, 'return_with_leftover_noise': 'enable'}},
         '14': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['5', 0], 'add_noise': 'disable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
@@ -149,7 +154,9 @@ def fluxo(m, c):
         '15': {'class_type': 'KSamplerAdvanced', 'inputs': {'model': ['6', 0], 'add_noise': 'disable', 'noise_seed': c['seed'], 'steps': S,
                'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'positive': ['12', 0], 'negative': ['12', 1],
                'latent_image': ['14', 0], 'start_at_step': 2, 'end_at_step': S, 'return_with_leftover_noise': 'disable'}},
-        '16': {'class_type': 'VAEDecode', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0]}},
+        '16': ({'class_type': 'VAEDecodeTiled', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0], 'tile_size': 512, 'overlap': 64,
+                'temporal_size': 64, 'temporal_overlap': 8}} if c.get('ladrilho', True) else
+               {'class_type': 'VAEDecode', 'inputs': {'samples': ['15', 0], 'vae': ['10', 0]}}),
         '18': {'class_type': 'SaveImage', 'inputs': {'images': ['16', 0], 'filename_prefix': c['nome']}},
     }
 
@@ -166,7 +173,11 @@ def gera(m, c):
     req = urllib.request.Request('http://127.0.0.1:8188/prompt', data=json.dumps({'prompt': fluxo(m, c)}).encode(),
                                  headers={'Content-Type': 'application/json'})
     try: pid = json.loads(urllib.request.urlopen(req).read())['prompt_id']
-    except urllib.error.HTTPError as e: log('fluxo recusado', e.read().decode()[:3000]); return False
+    except urllib.error.HTTPError as e:
+        log('fluxo recusado', e.read().decode()[:3000])
+        if c.get('ladrilho', True):   # o nó de VAE em ladrilhos mudou de nome ou de entradas: tenta o simples
+            c['ladrilho'] = False; log('tentando de novo com VAEDecode simples'); return gera(m, c)
+        return False
     while True:
         time.sleep(15)
         h = json.loads(urllib.request.urlopen(f'http://127.0.0.1:8188/history/{pid}').read())
